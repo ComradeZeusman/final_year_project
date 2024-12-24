@@ -1,0 +1,41 @@
+-->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESP32-CAM Stream</title>
+    <style>
+      body {
+        text-align: center;
+        background-color: #f0f0f0;
+      }
+
+      h1 {
+        color: #333;
+      }
+
+      .video-container {
+        width: 240px;
+        height: 240px;
+        margin: 0 auto;
+      }
+
+      .video-feed {
+        width: 240px;
+        height: 240px;
+        object-fit: contain;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ESP32-CAM Stream</h1>
+    <div class="video-container">
+      <img
+        class="video-feed"
+        src="{{ url_for('video_feed') }}"
+        alt="Face Detection Feed"
+      />
+    </div>
+  </body>
+</html>
