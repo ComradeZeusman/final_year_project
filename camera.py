@@ -33,6 +33,14 @@ def generate_frames():
             logging.error("Failed to capture frame")
             break
 
+        # Increase brightness
+        frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=30)
+
+        # Apply Histogram Equalization
+        frame_yuv = cv2.cvtColor(frame, cv2.COLOR_BGR2YUV)
+        frame_yuv[:, :, 0] = cv2.equalizeHist(frame_yuv[:, :, 0])
+        frame = cv2.cvtColor(frame_yuv, cv2.COLOR_YUV2BGR)
+
         # Resize frame
         height, width = frame.shape[:2]
         new_height = int(height * SCALE_FACTOR)
@@ -56,7 +64,7 @@ def generate_frames():
             # Update tracker
             tracking_quality = tracker.update(rgb_frame)
             
-            if tracking_quality >= 8.0:  # Good tracking confidence
+            if tracking_quality >= 5.0:  # Lowered tracking confidence threshold
                 tracked_position = tracker.get_position()
                 
                 # Get coordinates and draw rectangle
@@ -68,7 +76,7 @@ def generate_frames():
                 cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
                 logging.debug(f"Tracking face at position (x={x}, y={y}, w={w}, h={h})")
             else:
-             # Lost track, reset tracking
+                # Lost track, reset tracking
                 tracking = False
                 logging.info("Lost face tracking")
 
