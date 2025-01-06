@@ -618,8 +618,8 @@ static esp_err_t status_handler(httpd_req_t *req){
     p+=sprintf(p, "\"colorbar\":%u,", s->status.colorbar);
     p+=sprintf(p, "\"face_detect\":%u,", detection_enabled);
     p+=sprintf(p, "\"face_enroll\":%u,", is_enrolling);
-    p+=sprintf(p, "\"face_recognize\":%u", recognition_enabled);
-    p+=sprintf(p, "\"enroll_samples\":%u", ENROLL_CONFIRM_TIMES);
+    p+=sprintf(p, "\"face_recognize\":%u,", recognition_enabled);
+    p+=sprintf(p, "\"enroll_samples\":%u", ENROLL_CONFIRM_TIMES); // Removed quote, added comma
     *p++ = '}';
     *p++ = 0;
     httpd_resp_set_type(req, "application/json");
