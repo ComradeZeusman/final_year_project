@@ -657,6 +657,9 @@ static esp_err_t index_handler(httpd_req_t *req) {
             
             if(isFirstBoot || !isRegistered) {
                 Serial.println("Serving registration page");
+                 detection_enabled = 1;
+        recognition_enabled = 0;
+        is_enrolling = 1;
                 httpd_resp_set_type(req, "text/html");
                 return httpd_resp_send(req, REGISTRATION_HTML, strlen(REGISTRATION_HTML));
             }
@@ -711,6 +714,10 @@ static esp_err_t register_handler(httpd_req_t *req) {
 }
 
 void startCameraServer(){
+
+     detection_enabled = 1;
+        recognition_enabled = 0;
+        is_enrolling = 1;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
 
@@ -764,19 +771,19 @@ void startCameraServer(){
 
     ra_filter_init(&ra_filter, 20);
     
-    mtmn_config.type = FAST;
-    mtmn_config.min_face = 80;
-    mtmn_config.pyramid = 0.707;
-    mtmn_config.pyramid_times = 4;
-    mtmn_config.p_threshold.score = 0.6;
-    mtmn_config.p_threshold.nms = 0.7;
-    mtmn_config.p_threshold.candidate_number = 20;
-    mtmn_config.r_threshold.score = 0.7;
-    mtmn_config.r_threshold.nms = 0.7;
-    mtmn_config.r_threshold.candidate_number = 10;
-    mtmn_config.o_threshold.score = 0.7;
-    mtmn_config.o_threshold.nms = 0.7;
-    mtmn_config.o_threshold.candidate_number = 1;
+     mtmn_config.type = NORMAL;         // Change from FAST to NORMAL for better accuracy
+    mtmn_config.min_face = 60;         // Reduce minimum face size (default 80)
+    mtmn_config.pyramid = 0.85;        // Increase pyramid ratio (default 0.707)
+    mtmn_config.pyramid_times = 5;     // More pyramid layers (default 4)
+    mtmn_config.p_threshold.score = 0.5;     // Lower score threshold (default 0.6)
+    mtmn_config.p_threshold.nms = 0.6;       // Adjust NMS threshold
+    mtmn_config.p_threshold.candidate_number = 100;  // More candidates
+    mtmn_config.r_threshold.score = 0.6;     // Lower recognition threshold
+    mtmn_config.r_threshold.nms = 0.6;       // Adjust NMS
+    mtmn_config.r_threshold.candidate_number = 50;   // More candidates
+    mtmn_config.o_threshold.score = 0.6;     // Lower final threshold
+    mtmn_config.o_threshold.nms = 0.6;       // Adjust NMS
+    mtmn_config.o_threshold.candidate_number = 10;   // More final candidates
     
     face_id_init(&id_list, FACE_ID_SAVE_NUMBER, ENROLL_CONFIRM_TIMES);
     
