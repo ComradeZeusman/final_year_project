@@ -1,16 +1,3 @@
-// Copyright 2015-2016 Espressif Systems (Shanghai) PTE LTD
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
 #include "esp_http_server.h"
 #include "esp_timer.h"
 #include "esp_camera.h"
@@ -21,9 +8,17 @@
 #include "fb_gfx.h"
 #include "fd_forward.h"
 #include "fr_forward.h"
+#include "registration_html.h"
+#include <HTTPClient.h>
+#include <WiFi.h>
+#include <base64.h>
+#include <ArduinoJson.h>
+
 
 #define ENROLL_CONFIRM_TIMES 5
 #define FACE_ID_SAVE_NUMBER 7
+
+static bool isFirstBoot = true;
 
 #define FACE_COLOR_WHITE  0x00FFFFFF
 #define FACE_COLOR_BLACK  0x00000000
@@ -33,6 +28,8 @@
 #define FACE_COLOR_YELLOW (FACE_COLOR_RED | FACE_COLOR_GREEN)
 #define FACE_COLOR_CYAN   (FACE_COLOR_BLUE | FACE_COLOR_GREEN)
 #define FACE_COLOR_PURPLE (FACE_COLOR_BLUE | FACE_COLOR_RED)
+
+static String deviceId;
 
 typedef struct {
         size_t size; //number of values used for filtering
@@ -161,33 +158,82 @@ static void draw_face_boxes(dl_matrix3du_t *image_matrix, box_array_t *boxes, in
     }
 }
 
-static int run_face_recognition(dl_matrix3du_t *image_matrix, box_array_t *net_boxes){
+static int run_face_recognition(dl_matrix3du_t *image_matrix, box_array_t *net_boxes) {
     dl_matrix3du_t *aligned_face = NULL;
     int matched_id = 0;
 
     aligned_face = dl_matrix3du_alloc(1, FACE_WIDTH, FACE_HEIGHT, 3);
-    if(!aligned_face){
+    if(!aligned_face) {
         Serial.println("Could not allocate face recognition buffer");
         return matched_id;
     }
-    if (align_face(net_boxes, image_matrix, aligned_face) == ESP_OK){
-        if (is_enrolling == 1){
-            int8_t left_sample_face = enroll_face(&id_list, aligned_face);
 
-            if(left_sample_face == (ENROLL_CONFIRM_TIMES - 1)){
+    if (align_face(net_boxes, image_matrix, aligned_face) == ESP_OK) {
+        if (is_enrolling == 1) {
+            int8_t left_sample_face = enroll_face(&id_list, aligned_face);
+            
+            // Only send to server if deviceId is set
+            if(deviceId.length() > 0) {
+                HTTPClient http;
+                
+                // Convert face data to base64
+                size_t buf_size = aligned_face->w * aligned_face->h * 3;
+                uint8_t *buf = (uint8_t *)aligned_face->item;
+                String face_data = base64::encode(buf, buf_size);
+
+                // Prepare sample data
+                String sample_data = "{\"deviceId\":\"" + deviceId + 
+                                   "\",\"sampleId\":" + String(ENROLL_CONFIRM_TIMES - left_sample_face) +
+                                   ",\"faceData\":\"" + face_data + "\"}";
+
+                // Send sample to server
+                 http.begin("http://192.168.1.140:3000/face-sample");
+                http.addHeader("Content-Type", "application/json");
+                int httpResponseCode = http.POST(sample_data);
+
+                if (httpResponseCode > 0) {
+                    String response = http.getString();
+                    Serial.println("Server Response: " + response);
+                }
+                http.end();
+            }
+
+            if(left_sample_face == (ENROLL_CONFIRM_TIMES - 1)) {
                 Serial.printf("Enrolling Face ID: %d\n", id_list.tail);
             }
-            Serial.printf("Enrolling Face ID: %d sample %d\n", id_list.tail, ENROLL_CONFIRM_TIMES - left_sample_face);
-            rgb_printf(image_matrix, FACE_COLOR_CYAN, "ID[%u] Sample[%u]", id_list.tail, ENROLL_CONFIRM_TIMES - left_sample_face);
-            if (left_sample_face == 0){
+
+            Serial.printf("Enrolling Face ID: %d sample %d\n", id_list.tail, 
+                         ENROLL_CONFIRM_TIMES - left_sample_face);
+            rgb_printf(image_matrix, FACE_COLOR_CYAN, "ID[%u] Sample[%u]", 
+                      id_list.tail, ENROLL_CONFIRM_TIMES - left_sample_face);
+
+            if (left_sample_face == 0) {
                 is_enrolling = 0;
                 Serial.printf("Enrolled Face ID: %d\n", id_list.tail);
+                 if(deviceId.length() > 0) {
+                    HTTPClient http;
+                    String complete_data = "{\"deviceId\":\"" + deviceId + 
+                                         "\",\"enrollmentComplete\":true}";
+                    http.begin("http://192.168.1.140:3000/register");
+                    http.addHeader("Content-Type", "application/json");
+                    http.POST(complete_data);
+                    http.end();
+                }
             }
         } else {
             matched_id = recognize_face(&id_list, aligned_face);
             if (matched_id >= 0) {
                 Serial.printf("Match Face ID: %u\n", matched_id);
-                rgb_printf(image_matrix, FACE_COLOR_GREEN, "Hello Subject %u", matched_id);
+                rgb_printf(image_matrix, FACE_COLOR_GREEN, "Hello Owner");
+                
+                if(deviceId.length() > 0) {
+                    HTTPClient http;
+                    String verify_data = "{\"deviceId\":\"" + deviceId + 
+                         http.begin("http://192.168.1.140:3000/verify");
+                    http.addHeader("Content-Type", "application/json");
+                    http.POST(verify_data);
+                    http.end();
+                }
             } else {
                 Serial.println("No Match Found");
                 rgb_print(image_matrix, FACE_COLOR_RED, "Intruder Alert!");
@@ -196,12 +242,11 @@ static int run_face_recognition(dl_matrix3du_t *image_matrix, box_array_t *net_b
         }
     } else {
         Serial.println("Face Not Aligned");
-        //rgb_print(image_matrix, FACE_COLOR_YELLOW, "Human Detected");
     }
 
     dl_matrix3du_free(aligned_face);
     return matched_id;
-}
+}     
 
 static size_t jpg_encode_stream(void * arg, size_t index, const void* data, size_t len){
     jpg_chunking_t *j = (jpg_chunking_t *)arg;
@@ -536,9 +581,12 @@ static esp_err_t cmd_handler(httpd_req_t *req){
     return httpd_resp_send(req, NULL, 0);
 }
 
+#define FACE_WIDTH 112
+#define FACE_HEIGHT 112
+#define ENROLL_CONFIRM_TIMES 5
+
 static esp_err_t status_handler(httpd_req_t *req){
     static char json_response[1024];
-
     sensor_t * s = esp_camera_sensor_get();
     char * p = json_response;
     *p++ = '{';
@@ -571,6 +619,7 @@ static esp_err_t status_handler(httpd_req_t *req){
     p+=sprintf(p, "\"face_detect\":%u,", detection_enabled);
     p+=sprintf(p, "\"face_enroll\":%u,", is_enrolling);
     p+=sprintf(p, "\"face_recognize\":%u", recognition_enabled);
+    p+=sprintf(p, "\"enroll_samples\":%u", ENROLL_CONFIRM_TIMES);
     *p++ = '}';
     *p++ = 0;
     httpd_resp_set_type(req, "application/json");
@@ -578,18 +627,94 @@ static esp_err_t status_handler(httpd_req_t *req){
     return httpd_resp_send(req, json_response, strlen(json_response));
 }
 
-static esp_err_t index_handler(httpd_req_t *req){
+// Update index_handler
+static esp_err_t index_handler(httpd_req_t *req) {
+    Serial.println("Index handler called");
+    
+    HTTPClient http;
+    http.begin("http://192.168.1.178:3000/status");
+    int retry = 0;
+    int httpCode = 0;
+    
+    while(retry < 3 && httpCode <= 0) {
+        httpCode = http.GET();
+        if(httpCode <= 0) {
+            delay(1000);
+            retry++;
+        }
+    }
+    
+    if(httpCode > 0) {
+        String payload = http.getString();
+        StaticJsonDocument<200> doc;
+        DeserializationError error = deserializeJson(doc, payload);
+        
+        if(!error) {
+            isFirstBoot = doc["firstBoot"] | true;
+            bool isRegistered = doc["isRegistered"] | false;
+            
+            Serial.printf("First boot: %d, Registered: %d\n", isFirstBoot, isRegistered);
+            
+            if(isFirstBoot || !isRegistered) {
+                Serial.println("Serving registration page");
+                httpd_resp_set_type(req, "text/html");
+                return httpd_resp_send(req, REGISTRATION_HTML, strlen(REGISTRATION_HTML));
+            }
+        } else {
+            Serial.print("JSON Parse Error: ");
+            Serial.println(error.c_str());
+        }
+    }
+    
+    http.end();
+    
+    Serial.println("Serving camera page");
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    
     sensor_t * s = esp_camera_sensor_get();
-    if (s->id.PID == OV3660_PID) {
+    if(s->id.PID == OV3660_PID) {
         return httpd_resp_send(req, (const char *)index_ov3660_html_gz, index_ov3660_html_gz_len);
     }
     return httpd_resp_send(req, (const char *)index_ov2640_html_gz, index_ov2640_html_gz_len);
 }
 
+// Update register_handler
+static esp_err_t register_handler(httpd_req_t *req) {
+    Serial.println("Register handler called");
+    
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    
+    HTTPClient http;
+    http.begin("http://192.168.1.140:3000/register");
+    http.addHeader("Content-Type", "application/json");
+    
+    StaticJsonDocument<200> doc;
+    doc["deviceId"] = WiFi.macAddress();
+    doc["firstBoot"] = false;
+    
+    String jsonString;
+    serializeJson(doc, jsonString);
+    
+    int httpCode = http.POST(jsonString);
+    if(httpCode > 0) {
+        isFirstBoot = false;
+        Serial.println("Device registered successfully");
+        http.end();
+        return httpd_resp_send(req, "{\"status\":\"registered\"}", 21);
+    }
+    
+    Serial.printf("Registration failed with code: %d\n", httpCode);
+    http.end();
+    return httpd_resp_send(req, "{\"status\":\"failed\"}", 18);
+}
+
 void startCameraServer(){
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.server_port = 80;
+
+     
 
     httpd_uri_t index_uri = {
         .uri       = "/",
@@ -597,6 +722,21 @@ void startCameraServer(){
         .handler   = index_handler,
         .user_ctx  = NULL
     };
+
+     httpd_uri_t stream_uri = {
+        .uri       = "/stream",
+        .method    = HTTP_GET,
+        .handler   = stream_handler,
+        .user_ctx  = NULL
+    };
+
+       httpd_uri_t register_uri = {
+        .uri       = "/register",
+        .method    = HTTP_POST,
+        .handler   = register_handler,
+        .user_ctx  = NULL
+    };
+    
 
     httpd_uri_t status_uri = {
         .uri       = "/status",
@@ -619,12 +759,7 @@ void startCameraServer(){
         .user_ctx  = NULL
     };
 
-   httpd_uri_t stream_uri = {
-        .uri       = "/stream",
-        .method    = HTTP_GET,
-        .handler   = stream_handler,
-        .user_ctx  = NULL
-    };
+  
 
 
     ra_filter_init(&ra_filter, 20);
@@ -646,11 +781,13 @@ void startCameraServer(){
     face_id_init(&id_list, FACE_ID_SAVE_NUMBER, ENROLL_CONFIRM_TIMES);
     
     Serial.printf("Starting web server on port: '%d'\n", config.server_port);
-    if (httpd_start(&camera_httpd, &config) == ESP_OK) {
+   if (httpd_start(&camera_httpd, &config) == ESP_OK) {
         httpd_register_uri_handler(camera_httpd, &index_uri);
         httpd_register_uri_handler(camera_httpd, &cmd_uri);
         httpd_register_uri_handler(camera_httpd, &status_uri);
         httpd_register_uri_handler(camera_httpd, &capture_uri);
+        httpd_register_uri_handler(camera_httpd, &stream_uri);
+        httpd_register_uri_handler(camera_httpd, &register_uri); // Add registration handler
     }
 
     config.server_port += 1;
