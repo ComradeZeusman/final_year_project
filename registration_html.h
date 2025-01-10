@@ -63,18 +63,15 @@ async function captureFace() {
         setUI(true);
         showStatus('Initializing detection...');
 
-        // Reset and enable detection
-        await fetch(`${MAIN_SERVER}/control?var=face_detect&val=0`);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Reduce delays and simplify detection setup
         await fetch(`${MAIN_SERVER}/control?var=face_detect&val=1`);
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 100)); // Reduced from 500ms
 
         showStatus('Looking for face...');
         const capture = await fetch(`${MAIN_SERVER}/capture`);
         
         if (!capture.ok) {
-            const error = await capture.text();
-            throw new Error(error || 'Capture failed');
+            throw new Error('Capture failed');
         }
 
         faceImage = await capture.blob().then(blob => new Promise((resolve, reject) => {
@@ -88,12 +85,10 @@ async function captureFace() {
         document.getElementById('submitBtn').disabled = false;
     } catch (err) {
         showStatus(err.message, 'error');
-        console.error('Capture error:', err);
     } finally {
         setUI(false);
     }
 }
-
 async function submitRegistration(e) {
     e.preventDefault();
     if (!faceImage) {

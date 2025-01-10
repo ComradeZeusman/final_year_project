@@ -292,6 +292,8 @@ static esp_err_t stream_handler(httpd_req_t *req) {
     esp_err_t res = ESP_OK;
     size_t _jpg_buf_len = 0;
     uint8_t * _jpg_buf = NULL;
+    uint8_t * jpg_buf = NULL;
+    size_t jpg_len = 0;
     char * part_buf[64];
     dl_matrix3du_t *image_matrix = NULL;
     bool detected = false;
@@ -348,12 +350,14 @@ static esp_err_t stream_handler(httpd_req_t *req) {
 
                     // Convert back to JPEG
                     if(!fmt2jpg(image_matrix->item, fb->width*fb->height*3, fb->width, fb->height, 
-                               PIXFORMAT_RGB888, 90, &_jpg_buf, &_jpg_buf_len)) {
+                               PIXFORMAT_RGB888, 60, &jpg_buf, &jpg_len)) {
                         Serial.println("JPEG conversion failed");
                         res = ESP_FAIL;
                     }
                     esp_camera_fb_return(fb);
                     fb = NULL;
+                    _jpg_buf = jpg_buf;
+                    _jpg_buf_len = jpg_len;
                 }
                 dl_matrix3du_free(image_matrix);
             }
@@ -397,14 +401,12 @@ static esp_err_t stream_handler(httpd_req_t *req) {
 
         // Break on error
         if(res != ESP_OK) {
-            Serial.println("Stream error occurred");
             break;
         }
     }
 
     return res;
 }
-
 static esp_err_t cmd_handler(httpd_req_t *req){
     char*  buf;
     size_t buf_len;
@@ -594,10 +596,11 @@ static esp_err_t index_handler(httpd_req_t *req) {
 }
 
 // Update register_handler with proper JSON
-// Update constants
 #define FACE_WIDTH 112
 #define FACE_HEIGHT 112
 #define MAX_FACE_SIZE (FACE_WIDTH * FACE_HEIGHT * 3) // RGB888 format
+#define MAX_REG_SIZE (1024 * 50) // Increase to 50KB for registration data
+
 
 // Update capture_handler - Add face detection & return face data
 static esp_err_t capture_handler(httpd_req_t *req) {
@@ -687,31 +690,32 @@ static esp_err_t capture_handler(httpd_req_t *req) {
     return res;
 }
 // Update register_handler to handle single face sample
+// Update register_handler with increased buffer size
 static esp_err_t register_handler(httpd_req_t *req) {
     Serial.println("Register handler called");
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
-    const size_t MAX_REG_SIZE = 1024 * 10; // 10KB max for registration data
-    
     if (req->content_len > MAX_REG_SIZE) {
+        Serial.printf("Content too large: %d bytes\n", req->content_len);
         return httpd_resp_send(req, "{\"success\":false,\"message\":\"Content too large\"}", -1);
     }
 
     char* buffer = (char*)malloc(req->content_len + 1);
     if (!buffer) {
+        Serial.println("Failed to allocate memory for request");
         return httpd_resp_send(req, "{\"success\":false,\"message\":\"Memory error\"}", -1);
     }
 
     int received = httpd_req_recv(req, buffer, req->content_len);
     if (received <= 0) {
+        Serial.println("Failed to receive data");
         free(buffer);
         return httpd_resp_send(req, "{\"success\":false,\"message\":\"Read error\"}", -1);
     }
     buffer[received] = '\0';
-
-    // Send to MongoDB
+ // Send to MongoDB
     HTTPClient http;
     http.begin("http://192.168.1.178:3000/api/register");
     http.addHeader("Content-Type", "application/json");
@@ -726,7 +730,8 @@ static esp_err_t register_handler(httpd_req_t *req) {
         return httpd_resp_send(req, "{\"success\":true}", -1);
     }
 
-    return httpd_resp_send(req, "{\"success\":false}", -1);
+    Serial.printf("Registration failed with code: %d\n", httpCode);
+    return httpd_resp_send(req, "{\"success\":false,\"message\":\"Server error\"}", -1);
 }
 void startCameraServer() {
     // Initialize face detection first
@@ -786,12 +791,12 @@ void startCameraServer() {
     
     // Configure face detection parameters
     mtmn_config.type = FAST;
-    mtmn_config.min_face = 80;
-    mtmn_config.pyramid = 0.707;
-    mtmn_config.pyramid_times = 4;
-    mtmn_config.p_threshold.score = 0.6f;
-    mtmn_config.p_threshold.nms = 0.7f;
-    mtmn_config.p_threshold.candidate_number = 20;
+mtmn_config.min_face = 80;
+mtmn_config.pyramid = 0.7;  // Reduced from 0.707
+mtmn_config.pyramid_times = 3;  // Reduced from 4
+mtmn_config.p_threshold.score = 0.5f;  // Less strict threshold
+mtmn_config.p_threshold.nms = 0.7f;
+mtmn_config.p_threshold.candidate_number = 10;  // Reduced candidates
     mtmn_config.r_threshold.score = 0.7f;
     mtmn_config.r_threshold.nms = 0.7f;
     mtmn_config.r_threshold.candidate_number = 10;

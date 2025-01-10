@@ -185,10 +185,11 @@ void setup() {
         s->set_brightness(s, 1);
         s->set_saturation(s, -2);
     }
-    s->set_framesize(s, FRAMESIZE_VGA);
+  // Configure camera sensor
+s->set_framesize(s, FRAMESIZE_QVGA);  // Smaller frame size
 s->set_quality(s, 12);
-s->set_vflip(s, 0);
-s->set_hmirror(s, 0);
+s->set_brightness(s, 1);
+s->set_contrast(s, 1);
 
     // Connect to WiFi
     WiFi.begin(ssid, password);
